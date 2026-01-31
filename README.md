@@ -18,3 +18,6 @@ Just open the page, paste your Base32 key, and get rotating 6-digit codes instan
 - One-click copy
 - Clean, minimal UI
 - Zero dependencies
+
+Visit website here:
+https://4613.github.io/totp-generator/
