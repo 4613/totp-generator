@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>TOTP</title>
+
+<style>
+body{
+ margin:0;
+ height:100vh;
+ background:radial-gradient(circle at top,#1e293b,#020617);
+ font-family:system-ui,Arial;
+ display:flex;
+ align-items:center;
+ justify-content:center;
+ color:#e5e7eb;
+}
+
+.card{
+ background:rgba(2,6,23,.85);
+ backdrop-filter:blur(8px);
+ padding:32px;
+ border-radius:18px;
+ width:360px;
+ box-shadow:0 30px 60px rgba(0,0,0,.6);
+}
+
+h2{
+ text-align:center;
+ font-weight:500;
+ margin-top:0;
+}
+
+.secret-wrap{
+ position:relative;
+ width:100%;
+}
+
+.secret-wrap input{
+ width:100%;
+ padding:10px;
+ padding-right:42px;
+ border-radius:10px;
+ border:1px solid #334155;
+ background:#020617;
+ color:white;
+ outline:none;
+ box-sizing:border-box;
+}
+
+.eye-btn{
+ position:absolute;
+ right:8px;
+ top:50%;
+ transform:translateY(-50%);
+ background:none;
+ border:none;
+ cursor:pointer;
+ opacity:.6;
+ padding:0;
+}
+
+.eye-btn:hover{
+ opacity:1;
+}
+
+.code{
+ margin-top:22px;
+ text-align:center;
+ font-size:42px;
+ letter-spacing:6px;
+}
+
+.bar{
+ height:6px;
+ background:#020617;
+ border-radius:10px;
+ overflow:hidden;
+ margin-top:12px;
+}
+
+.fill{
+ height:100%;
+ background:linear-gradient(90deg,#38bdf8,#818cf8);
+ width:0%;
+}
+
+.timer{
+ text-align:center;
+ margin-top:6px;
+ font-size:13px;
+ color:#94a3b8;
+}
+
+button.main{
+ margin-top:16px;
+ width:100%;
+ padding:10px;
+ border:none;
+ border-radius:10px;
+ background:linear-gradient(90deg,#2563eb,#7c3aed);
+ color:white;
+ cursor:pointer;
+}
+
+small{
+ display:block;
+ text-align:center;
+ margin-top:8px;
+ color:#64748b;
+}
+
+.privacy{
+ margin-top:14px;
+ font-size:12px;
+ line-height:1.4;
+ text-align:center;
+ color:#94a3b8;
+}
+</style>
+</head>
+
+<body>
+<div class="card">
+<h2>TOTP</h2>
+
+<div class="secret-wrap">
+<input id="secret" type="password" placeholder="XXXX XXXX XXXX XXXX" oninput="saveSecret()">
+<button class="eye-btn" onclick="toggleSecret()" tabindex="-1">
+<svg id="eyeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+<circle cx="12" cy="12" r="3"/>
+</svg>
+</button>
+</div>
+
+<div class="code" id="out">------</div>
+
+<div class="bar"><div class="fill" id="fill"></div></div>
+<div class="timer" id="timer"></div>
+
+<button class="main" onclick="copy()">Copy code</button>
+<small id="copied"></small>
+
+<p class="privacy">
+This tool runs entirely in your browser. Your secret key is stored only in your local browser storage and is never sent anywhere. There is no server, no tracking, and no external requests. Everything happens locally on your device.
+</p>
+</div>
+
+<script>
+const STORE="totp_secret";
+const VIS="totp_vis";
+let lastStep=-1;
+
+function base32Decode(s){
+ const a="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+ s=s.replace(/\s+/g,'').toUpperCase();
+ let bits="";
+ for(let c of s){let v=a.indexOf(c);if(v>=0)bits+=v.toString(2).padStart(5,"0");}
+ let b=[];
+ for(let i=0;i+8<=bits.length;i+=8)b.push(parseInt(bits.slice(i,i+8),2));
+ return new Uint8Array(b);
+}
+
+function saveSecret(){
+ let v=document.getElementById("secret").value.toUpperCase().replace(/[^A-Z2-7]/g,"");
+ v=v.slice(0,16);
+ v=v.match(/.{1,4}/g);
+ v=v?v.join(" "):"";
+ document.getElementById("secret").value=v;
+
+ if(v){
+  localStorage.setItem(STORE,v);
+  gen();
+ }
+}
+
+async function gen(){
+ const secret=document.getElementById("secret").value;
+ if(!secret)return;
+
+ const keyBytes=base32Decode(secret);
+ const epoch=Math.floor(Date.now()/1000/30);
+ const msg=new Uint8Array(8);
+ let t=epoch;
+ for(let i=7;i>=0;i--){msg[i]=t&255;t>>=8;}
+
+ const key=await crypto.subtle.importKey("raw",keyBytes,{name:"HMAC",hash:"SHA-1"},false,["sign"]);
+ const sig=new Uint8Array(await crypto.subtle.sign("HMAC",key,msg));
+ const off=sig[sig.length-1]&15;
+
+ const bin=((sig[off]&127)<<24)|((sig[off+1]&255)<<16)|((sig[off+2]&255)<<8)|(sig[off+3]&255);
+ document.getElementById("out").innerText=(bin%1000000).toString().padStart(6,"0");
+}
+
+function loop(){
+ const now=Date.now();
+ const step=Math.floor(now/30000);
+
+ if(step!==lastStep||document.getElementById("out").innerText==="------"){
+  lastStep=step;
+  gen();
+ }
+
+ const ms=now%30000;
+ document.getElementById("fill").style.width=(ms/30000*100)+"%";
+ document.getElementById("timer").innerText="refresh in "+Math.ceil((30000-ms)/1000)+"s";
+
+ requestAnimationFrame(loop);
+}
+
+function copy(){
+ navigator.clipboard.writeText(document.getElementById("out").innerText);
+ document.getElementById("copied").innerText="copied";
+ setTimeout(()=>document.getElementById("copied").innerText="",1000);
+}
+
+function toggleSecret(){
+ const i=document.getElementById("secret");
+ const icon=document.getElementById("eyeIcon");
+ if(i.type==="password"){
+  i.type="text";
+  icon.innerHTML='<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"/><path d="M1 1l22 22"/>';
+  localStorage.setItem(VIS,"1");
+ }else{
+  i.type="password";
+  icon.innerHTML='<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>';
+  localStorage.setItem(VIS,"0");
+ }
+}
+
+const saved=localStorage.getItem(STORE);
+if(saved)document.getElementById("secret").value=saved;
+
+if(localStorage.getItem(VIS)==="1"){
+ document.getElementById("secret").type="text";
+ document.getElementById("eyeIcon").innerHTML='<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"/><path d="M1 1l22 22"/>';
+}else{
+ document.getElementById("secret").type="password";
+}
+
+loop();
+</script>
+</body>
+</html>
